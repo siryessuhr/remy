@@ -1,0 +1,58 @@
+target-version = "py313"
+line-length = 120
+
+[lint]
+select = [
+    # pyflakes
+    "F",
+    # pycodestyle
+    "E", "W",
+    # isort
+    "I",
+    # pep8-naming
+    "N",
+    # pyupgrade
+    "UP",
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-comprehensions
+    "C4",
+    # flake8-executable
+    "EXE",
+    # flake8-implicit-str-concat
+    "ISC",
+    # flake8-pyi
+    "PYI",
+    # flake8-raise
+    "RSE",
+    # flake8-return
+    "RET",
+    # flake8-simplify
+    "SIM",
+    # mccabe
+    "C90",
+    # eradicate
+    "ERA",
+    # flynt
+    "FLY",
+    # pylint
+    "PLC", "PLE", "PIE", "PLW",
+    # tidy imports
+    "T201",
+    # no print statements
+    "T100",
+    # no debug statements
+    "PERF",
+    # ruff-specific
+    "RUF",
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101"]
