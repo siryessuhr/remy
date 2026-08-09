@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     # LLM / Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "gemma4:31b"
+    OLLAMA_EMBEDDING_MODEL: str = "qwen3-embedding:latest"
+    OLLAMA_EMBEDDING_DIMENSIONS: int = 512
 
     # LangSmith tracing
     LANGSMITH_API_KEY: str
