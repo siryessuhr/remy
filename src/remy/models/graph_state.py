@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from remy.models.recipe import BaseRecipeModel, RecipeModel
+
 
 class UserIntent(StrEnum):
     """User intent for the recipe extraction sub-graph."""
@@ -24,6 +26,5 @@ class RecipeExtractionState(BaseModel):
     url: str = ""
     raw_html: str = ""
     parsed_body: str = ""
-    extracted: dict = {}  # {"ingredients": [...], "instructions": [...]}
+    processed_recipe: BaseRecipeModel | RecipeModel | None = None
     labels: list[str] = []
-    extraction_valid: bool = False

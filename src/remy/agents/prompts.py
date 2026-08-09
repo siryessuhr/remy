@@ -35,3 +35,15 @@ If there is no URL provided, the "url" field should be an empty string.
 
 The user request is: "{user_request}".
 """
+
+GENERATE_LABELS_PROMPT = """
+You are a recipe extraction agent. You will be given a list of ingredients and instructions and you need to generate a
+list of labels for the recipe. The labels should be relevant to the ingredients and should be in the form of a list
+of strings.
+
+Recipe ingredients:
+{ingredients}
+
+Recipe Instructions:
+{instructions}
+"""

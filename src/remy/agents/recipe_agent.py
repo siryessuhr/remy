@@ -11,9 +11,10 @@ from langgraph.graph.state import CompiledStateGraph
 from loguru import logger as log
 from pydantic import BaseModel
 
-from remy.agents.prompts import RECIPE_EXTRACTION_PROMPT, USER_INTENT_PROMPT
-from remy.models import BaseRecipeModel, RecipeExtractionState
+from remy.agents.prompts import GENERATE_LABELS_PROMPT, RECIPE_EXTRACTION_PROMPT, USER_INTENT_PROMPT
+from remy.models import BaseRecipeModel, RecipeExtractionState, RecipeModel
 from remy.settings import settings
+from remy.utils import generate_embeddings
 
 
 class RecipeAgent:
@@ -57,11 +58,15 @@ class RecipeAgent:
         graph.add_node("fetch_recipe_from_url", self._fetch_recipe_from_url)
         graph.add_node("parse_html", self._parse_html)
         graph.add_node("extract_recipe", self._extract_recipe)
+        graph.add_node("generate_labels", self._generate_labels)
+        graph.add_node("generate_embeddings", self._generate_embeddings)
 
         graph.set_entry_point("understand_user_intent")
 
         graph.add_edge("fetch_recipe_from_url", "parse_html")
         graph.add_edge("parse_html", "extract_recipe")
+        graph.add_edge("extract_recipe", "generate_labels")
+        graph.add_edge("generate_labels", "generate_embeddings")
         graph.add_conditional_edges(
             "understand_user_intent",
             lambda state: state.user_intent,
@@ -86,31 +91,66 @@ class RecipeAgent:
             "url": result.get("url"),
         }
 
-    def _fetch_recipe_from_url(self, state: RecipeExtractionState) -> str:
+    def _fetch_recipe_from_url(self, state: RecipeExtractionState) -> dict[str, str | None]:
         """Fetch the recipe text from the given URL."""
         log.info(f"Fetching recipe from URL: {state.url}")
         with httpx2.Client(timeout=30.0) as client:
             resp = client.get(state.url)
             resp.raise_for_status()
 
-            return {"raw_html": resp.text,}
+            return {"raw_html": resp.text}
 
-    def _parse_html(self, state: RecipeExtractionState) -> str:
+    def _parse_html(self, state: RecipeExtractionState) -> dict[str, str | None]:
         """Parse the HTML content and extract the text."""
+        log.info("Parsing HTML content...")
         soup = BeautifulSoup(state.raw_html, "lxml")
         parsed_body = soup.get_text(separator="\n", strip=True)
         return {"parsed_body": parsed_body}
 
-    def _extract_recipe(self, state: RecipeExtractionState) -> BaseRecipeModel:
+    def _extract_recipe(self, state: RecipeExtractionState) -> dict[str, str | None]:
         """Extract a recipe from the given text input using the LLM."""
         prompt = ChatPromptTemplate.from_template(RECIPE_EXTRACTION_PROMPT)
         chain = prompt | self.llm
         log.info("Extracting recipe from text input...")
         response = chain.invoke({"text": state.user_request})
         log.debug(f"Raw LLM response: {response}")
-        return BaseRecipeModel.model_validate_json(response.content.strip())
+        recipe = BaseRecipeModel.model_validate_json(response.content.strip())
+        log.info(f"Extracted recipe: {recipe}")
+        return {"processed_recipe": recipe}
 
-    def invoke(self, user_query: str) -> BaseRecipeModel:
+    def _generate_labels(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Generate labels for the extracted recipe."""
+        log.info("Generating labels for the extracted recipe...")
+        prompt = ChatPromptTemplate.from_template(GENERATE_LABELS_PROMPT)
+        chain = prompt | self.llm
+        response = chain.invoke(
+            {
+                "ingredients": state.processed_recipe.ingredients,
+                "instructions": state.processed_recipe.instructions,
+            }
+        )
+        log.debug(f"Raw LLM response: {response}")
+        return {"labels": json.loads(response.content.strip())["labels"]}
+
+
+    def _generate_embeddings(self, state: RecipeExtractionState):
+        """Generate embeddings for both ingredients & instructions."""
+        log.info("Generate embeddings for recipe ingredients & instructions.")
+        ing_embed = generate_embeddings(state.processed_recipe.ingredients)
+        inst_embed = generate_embeddings(state.processed_recipe.instructions)
+
+        recipe = RecipeModel(
+            ingred_embedding=ing_embed,
+            instru_embedding=inst_embed,
+            labels=f"{state.labels}",
+            **state.processed_recipe.model_dump(),
+        )
+        log.debug(f"Final recipe model: {recipe}")
+
+        return {"processed_recipe": recipe}
+
+
+    def invoke(self, user_query: str):
         """Invoke the recipe extraction agent with a user query."""
         state = RecipeExtractionState(user_request=user_query)
         state_graph = self._create_graph(RecipeExtractionState)
