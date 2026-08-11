@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    user: appuser
     container_name: remy-app
     ports:
       - "8000:8000"
@@ -13,8 +14,8 @@ services:
       OLLAMA_BASE_URL: http://localhost:11434
       LANGSMITH_TRACING_V2: "${LANGSMITH_TRACING_V2:-false}"
     volumes:
-      - ./src:/app/src  # hot-reload during dev
-      - .env:/app/.env:ro
+      - ./src:/home/appuser/app/src  # hot-reload during dev
+      - .env:/home/appuser/app/.env:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,12 +51,26 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama  # persist downloaded models
+      - ~/.ollama:/root/.ollama
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434"]
       interval: 30s
       timeout: 10s
       retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: remy-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://app:8000
+    depends_on:
+      app:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
   postgres_data:
