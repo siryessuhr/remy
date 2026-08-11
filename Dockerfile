@@ -19,7 +19,8 @@ RUN --mount=type=cache,target=/home/appuser/app/.cache/uv,uid=1001 \
 FROM build AS service
 
 COPY pyproject.toml ./
-COPY ruff.toml ./
+COPY uv.lock ./
+COPY README.md ./
 COPY src/ ./src/
 COPY scripts/start_server.sh ./scripts/
 

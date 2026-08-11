@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Self
 
 import httpx2
@@ -248,6 +249,75 @@ class RecipeAgent:
 
         log.info(f"Inserted recipe into database for URL: {recipe.url}")
         return {"processed_recipe": recipe}
+
+    async def stream(self, user_query: str, session: AsyncSession | None = None) -> AsyncIterator[dict[str, object]]:
+        """Stream recipe-agent progress updates while processing a user query."""
+        if session is not None:
+            scoped_agent = RecipeAgent(
+                llm=self.llm,
+                session=session,
+                session_factory=self.session_factory,
+            )
+            async for event in scoped_agent._stream_with_session(user_query, session):
+                yield event
+            return
+
+        if self.session is not None:
+            async for event in self._stream_with_session(user_query, self.session):
+                yield event
+            return
+
+        if self.session_factory is None:
+            message = "No database session available. Provide a session or initialize with from_env()."
+            raise ValueError(message)
+
+        async with self.session_factory() as internal_session:
+            scoped_agent = RecipeAgent(
+                llm=self.llm,
+                session=internal_session,
+                session_factory=self.session_factory,
+            )
+            async for event in scoped_agent._stream_with_session(user_query, internal_session):
+                yield event
+
+    async def _stream_with_session(
+        self,
+        user_query: str,
+        session: AsyncSession | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Process the recipe pipeline and emit progress updates for a given session."""
+        yield {"type": "progress", "message": "Understanding your request..."}
+        state = RecipeExtractionState(user_request=user_query)
+
+        intent_state = await self._understand_user_intent(state)
+        state = state.model_copy(update=intent_state)
+        if state.user_intent == "extract_recipe_from_url":
+            yield {"type": "progress", "message": "Fetching the recipe from the provided URL..."}
+            state = state.model_copy(update=await self._fetch_recipe_from_url(state))
+            yield {"type": "progress", "message": "Parsing the recipe content..."}
+            state = state.model_copy(update=await self._parse_html(state))
+        else:
+            yield {"type": "progress", "message": "Extracting the recipe from your request..."}
+
+        yield {"type": "progress", "message": "Extracting the recipe details..."}
+        state = state.model_copy(update=await self._extract_recipe(state))
+        yield {"type": "progress", "message": "Generating labels..."}
+        state = state.model_copy(update=await self._generate_labels(state))
+        yield {"type": "progress", "message": "Generating embeddings..."}
+        state = state.model_copy(update=await self._generate_embeddings(state))
+
+        if session is None:
+            message = "A database session is required to persist the extracted recipe."
+            raise ValueError(message)
+
+        state = state.model_copy(update=await self._insert_to_db(state))
+        yield {
+            "type": "result",
+            "payload": {
+                "user_request": user_query,
+                "recipe": state.processed_recipe.model_dump() if state.processed_recipe else None,
+            },
+        }
 
     async def invoke(self, user_query: str, session: AsyncSession | None = None) -> dict[str, object]:
         """Invoke the recipe extraction agent with a user query."""
