@@ -9,6 +9,7 @@ import uvicorn
 from alembic.config import Config
 from dotenv import load_dotenv
 from loguru import logger as log
+import sqlalchemy
 from sqlalchemy import create_engine
 
 from alembic import command
@@ -91,6 +92,7 @@ def _initialize_database_schema(database_url: str) -> None:
     sync_database_url = _normalize_database_url_for_alembic(database_url)
     engine = create_engine(sync_database_url, echo=False)
     with engine.begin() as connection:
+        connection.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS vector"))
         # pyrefly: ignore [missing-attribute]
         RecipeModel.metadata.create_all(connection, tables=[RecipeModel.__table__])
 
