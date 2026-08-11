@@ -204,7 +204,7 @@ class RecipeAgent:
         # pyrefly: ignore [bad-assignment]
         return {"processed_recipe": recipe}
 
-    async def _generate_labels(self, state: RecipeExtractionState) -> dict[str, str | None]:
+    async def _generate_labels(self, state: RecipeExtractionState) -> dict[str, list[str]]:
         """Generate labels for the extracted recipe.
 
         Args:

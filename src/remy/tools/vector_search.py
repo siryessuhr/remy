@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.tools import tool
 from sqlalchemy import Float, literal, select
@@ -71,7 +71,8 @@ async def vector_similarity_search(
     try:
         async with session_factory() as session:
             query_vector = literal(query_embedding)
-            distance_expression = RecipeModel.ingred_embedding.op("<=>", return_type=Float)(query_vector)
+            ingred_embedding = cast(Any, RecipeModel.ingred_embedding)
+            distance_expression = ingred_embedding.op("<=>", return_type=Float)(query_vector)
             statement = (
                 select(RecipeModel, distance_expression.label("distance")).order_by(distance_expression).limit(top_k)
             )

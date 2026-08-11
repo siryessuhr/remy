@@ -1,5 +1,5 @@
 import json
-from typing import Any, get_origin
+from typing import Any, Literal, get_origin
 
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -17,7 +17,7 @@ def use_ollama() -> bool:
     return bool(settings.OLLAMA_BASE_URL and settings.OLLAMA_MODEL)
 
 
-def get_llm(*, format: str | None = "json"):
+def get_llm(*, format: Literal["", "json"] | dict[str, Any] | None = "json"):
     """Create a chat LLM using the configured provider.
 
     Args:
@@ -27,10 +27,15 @@ def get_llm(*, format: str | None = "json"):
         A configured chat model instance for either OpenAI or Ollama.
     """
     if use_ollama():
-        log.info("Using Ollama LLM provider: {}", settings.OLLAMA_MODEL)
+        ollama_model = settings.OLLAMA_MODEL
+        ollama_base_url = settings.OLLAMA_BASE_URL
+        if ollama_model is None or ollama_base_url is None:
+            raise ValueError("OLLAMA_BASE_URL and OLLAMA_MODEL are required when Ollama is enabled.")
+
+        log.info("Using Ollama LLM provider: {}", ollama_model)
         return ChatOllama(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_MODEL,
+            base_url=ollama_base_url,
+            model=ollama_model,
             format=format or "json",
             temperature=0,
         )
@@ -53,10 +58,15 @@ def get_embeddings_client():
         A configured embedding model instance for the active provider.
     """
     if use_ollama():
-        log.info("Using Ollama embeddings provider: {}", settings.OLLAMA_EMBEDDING_MODEL)
+        ollama_model = settings.OLLAMA_EMBEDDING_MODEL
+        ollama_base_url = settings.OLLAMA_BASE_URL
+        if ollama_model is None or ollama_base_url is None:
+            raise ValueError("OLLAMA_BASE_URL and OLLAMA_EMBEDDING_MODEL are required when Ollama is enabled.")
+
+        log.info("Using Ollama embeddings provider: {}", ollama_model)
         return OllamaEmbeddings(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_EMBEDDING_MODEL,
+            base_url=ollama_base_url,
+            model=ollama_model,
             dimensions=settings.OLLAMA_EMBEDDING_DIMENSIONS,
         )
 

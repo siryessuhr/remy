@@ -1,5 +1,7 @@
 """Tests for RecipeAgent semantic search behavior."""
 
+from typing import Any, cast
+
 import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy import Float, literal
@@ -11,7 +13,8 @@ from remy.tools.vector_search import vector_similarity_search
 
 def test_vector_distance_expression_returns_float_distance():
     """Distance queries must produce numeric values, not pgvector objects."""
-    expression = RecipeModel.ingred_embedding.op("<=>", return_type=Float)(literal([0.1, 0.2, 0.3]))
+    ingred_embedding = cast(Any, RecipeModel.ingred_embedding)
+    expression = ingred_embedding.op("<=>", return_type=Float)(literal([0.1, 0.2, 0.3]))
 
     assert isinstance(expression.type, Float)
 
@@ -90,8 +93,8 @@ async def test_stream_extraction_intent_returns_added_recipe_message(mocker):
     assert events[-1]["type"] == "result"
     # pyrefly: ignore [bad-index]
     assert events[-1]["payload"]["response"]["message"] == "Added 'Tomato Soup' to your recipe collection."
-    # pyrefly: ignore [bad-index]
-    assert "recipe" not in events[-1]["payload"]
+    payload = cast(dict[str, Any], events[-1]["payload"])
+    assert "recipe" not in payload
 
 
 @pytest.mark.asyncio
