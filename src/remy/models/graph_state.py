@@ -28,3 +28,4 @@ class RecipeExtractionState(BaseModel):
     parsed_body: str = ""
     processed_recipe: BaseRecipeModel | RecipeModel | None = None
     labels: list[str] = []
+    is_recipe_in_db: bool = False

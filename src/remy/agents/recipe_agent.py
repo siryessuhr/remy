@@ -1,6 +1,8 @@
 """Remy the Recipe Agent."""
 
+import asyncio
 import json
+from typing import Self
 
 import httpx2
 from bs4 import BeautifulSoup
@@ -10,8 +12,10 @@ from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger as log
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from remy.agents.prompts import GENERATE_LABELS_PROMPT, RECIPE_EXTRACTION_PROMPT, USER_INTENT_PROMPT
+from remy.database import create_engine, create_session_factory
 from remy.models import BaseRecipeModel, RecipeExtractionState, RecipeModel
 from remy.settings import settings
 from remy.utils import generate_embeddings
@@ -20,17 +24,40 @@ from remy.utils import generate_embeddings
 class RecipeAgent:
     """Agent that extracts a recipe from a given text input."""
 
-    def __init__(self, llm: ChatOllama):
+    def __init__(
+        self,
+        llm: ChatOllama,
+        session: AsyncSession | None = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
+        """Initialize the recipe agent and optional async session factory.
+
+        Args:
+            llm: LLM instance used by graph nodes.
+            session: Optional active async session used by DB nodes.
+            session_factory: Optional async session factory for persistence.
+        """
         self.llm = llm
+        self.session = session
+        self.session_factory = session_factory
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls) -> Self:
+        """Build a recipe agent from environment settings.
+
+        Returns:
+            Configured recipe agent.
+        """
+        engine = create_engine(settings.DATABASE_URL)
+        session_factory = create_session_factory(engine)
+
         return cls(
             llm=ChatOllama(
                 base_url=settings.OLLAMA_BASE_URL,
                 model=settings.OLLAMA_MODEL,
                 format="json",
             ),
+            session_factory=session_factory,
         )
 
     def _create_graph(self, state_schema: type[BaseModel]) -> CompiledStateGraph:
@@ -45,7 +72,8 @@ class RecipeAgent:
         #     provide enough information, ask the user for more information about their target incredients,
         #     dietary restrictions, and preferences. Then generate a meal plan with recipes from the database.
 
-        # 1a. Nodes: fetch_url -> parse_html -> extract_recipe -> generate_embeddings -> generate_labels -> persist to db
+        # 1a. Nodes: fetch_url -> parse_html -> extract_recipe
+        #     -> generate_embeddings -> generate_labels -> persist to db
         # 1b. Nodes: extract_recipe -> generate_embeddings -> generate_labels -> persist to db
         # 1c. Nodes: search_db_with_vectors -> return_recipe
         # 1d. Nodes: generate_meal_plan -> generate_embeddings -> generate_labels -> persist to db
@@ -60,6 +88,7 @@ class RecipeAgent:
         graph.add_node("extract_recipe", self._extract_recipe)
         graph.add_node("generate_labels", self._generate_labels)
         graph.add_node("generate_embeddings", self._generate_embeddings)
+        graph.add_node("insert_to_db", self._insert_to_db)
 
         graph.set_entry_point("understand_user_intent")
 
@@ -67,6 +96,7 @@ class RecipeAgent:
         graph.add_edge("parse_html", "extract_recipe")
         graph.add_edge("extract_recipe", "generate_labels")
         graph.add_edge("generate_labels", "generate_embeddings")
+        graph.add_edge("generate_embeddings", "insert_to_db")
         graph.add_conditional_edges(
             "understand_user_intent",
             lambda state: state.user_intent,
@@ -78,12 +108,19 @@ class RecipeAgent:
 
         return graph.compile()
 
-    def _understand_user_intent(self, state: RecipeExtractionState) -> dict[str, str | None]:
-        """Understand the user's intent from their request."""
+    async def _understand_user_intent(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Understand the user's intent from their request.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            User intent payload used for graph routing.
+        """
         prompt = ChatPromptTemplate.from_template(USER_INTENT_PROMPT)
         chain = prompt | self.llm
         log.info("Understanding user intent...")
-        response = chain.invoke({"user_request": state.user_request})
+        response = await chain.ainvoke({"user_request": state.user_request})
         log.debug(f"Raw LLM response: {response}")
         result = json.loads(response.content.strip())
         return {
@@ -91,39 +128,68 @@ class RecipeAgent:
             "url": result.get("url"),
         }
 
-    def _fetch_recipe_from_url(self, state: RecipeExtractionState) -> dict[str, str | None]:
-        """Fetch the recipe text from the given URL."""
+    async def _fetch_recipe_from_url(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Fetch the recipe text from the given URL.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            HTML payload fetched from the target URL.
+        """
         log.info(f"Fetching recipe from URL: {state.url}")
-        with httpx2.Client(timeout=30.0) as client:
-            resp = client.get(state.url)
+        async with httpx2.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(state.url)
             resp.raise_for_status()
 
             return {"raw_html": resp.text}
 
-    def _parse_html(self, state: RecipeExtractionState) -> dict[str, str | None]:
-        """Parse the HTML content and extract the text."""
+    async def _parse_html(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Parse the HTML content and extract the text.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Parsed text body extracted from HTML.
+        """
         log.info("Parsing HTML content...")
         soup = BeautifulSoup(state.raw_html, "lxml")
         parsed_body = soup.get_text(separator="\n", strip=True)
         return {"parsed_body": parsed_body}
 
-    def _extract_recipe(self, state: RecipeExtractionState) -> dict[str, str | None]:
-        """Extract a recipe from the given text input using the LLM."""
+    async def _extract_recipe(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Extract a recipe from text using the LLM.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Processed recipe payload validated against BaseRecipeModel.
+        """
         prompt = ChatPromptTemplate.from_template(RECIPE_EXTRACTION_PROMPT)
         chain = prompt | self.llm
         log.info("Extracting recipe from text input...")
-        response = chain.invoke({"text": state.user_request})
+        source_text = state.parsed_body or state.user_request
+        response = await chain.ainvoke({"text": source_text})
         log.debug(f"Raw LLM response: {response}")
         recipe = BaseRecipeModel.model_validate_json(response.content.strip())
         log.info(f"Extracted recipe: {recipe}")
         return {"processed_recipe": recipe}
 
-    def _generate_labels(self, state: RecipeExtractionState) -> dict[str, str | None]:
-        """Generate labels for the extracted recipe."""
+    async def _generate_labels(self, state: RecipeExtractionState) -> dict[str, str | None]:
+        """Generate labels for the extracted recipe.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Label list payload extracted from the model response.
+        """
         log.info("Generating labels for the extracted recipe...")
         prompt = ChatPromptTemplate.from_template(GENERATE_LABELS_PROMPT)
         chain = prompt | self.llm
-        response = chain.invoke(
+        response = await chain.ainvoke(
             {
                 "ingredients": state.processed_recipe.ingredients,
                 "instructions": state.processed_recipe.instructions,
@@ -132,12 +198,18 @@ class RecipeAgent:
         log.debug(f"Raw LLM response: {response}")
         return {"labels": json.loads(response.content.strip())["labels"]}
 
+    async def _generate_embeddings(self, state: RecipeExtractionState) -> dict[str, RecipeModel]:
+        """Generate embeddings for both ingredients and instructions.
 
-    def _generate_embeddings(self, state: RecipeExtractionState):
-        """Generate embeddings for both ingredients & instructions."""
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Recipe model enriched with vector embeddings.
+        """
         log.info("Generate embeddings for recipe ingredients & instructions.")
-        ing_embed = generate_embeddings(state.processed_recipe.ingredients)
-        inst_embed = generate_embeddings(state.processed_recipe.instructions)
+        ing_embed = await asyncio.to_thread(generate_embeddings, state.processed_recipe.ingredients)
+        inst_embed = await asyncio.to_thread(generate_embeddings, state.processed_recipe.instructions)
 
         recipe = RecipeModel(
             ingred_embedding=ing_embed,
@@ -149,9 +221,58 @@ class RecipeAgent:
 
         return {"processed_recipe": recipe}
 
+    async def _insert_to_db(self, state: RecipeExtractionState) -> dict[str, RecipeModel]:
+        """Insert a processed recipe in the database.
 
-    def invoke(self, user_query: str):
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Updated state payload containing the persisted recipe.
+
+        Raises:
+            ValueError: If there is no valid processed recipe to persist.
+        """
+        recipe = state.processed_recipe
+        if not isinstance(recipe, RecipeModel):
+            message = "Cannot persist recipe: processed_recipe must be a RecipeModel."
+            raise ValueError(message)
+
+        if self.session is None:
+            message = "Cannot persist recipe: no active database session is available."
+            raise ValueError(message)
+
+        self.session.add(recipe)
+        await self.session.commit()
+        await self.session.refresh(recipe)
+
+        log.info(f"Inserted recipe into database for URL: {recipe.url}")
+        return {"processed_recipe": recipe}
+
+    async def invoke(self, user_query: str, session: AsyncSession | None = None) -> dict[str, object]:
         """Invoke the recipe extraction agent with a user query."""
+        if session is not None:
+            scoped_agent = RecipeAgent(
+                llm=self.llm,
+                session=session,
+                session_factory=self.session_factory,
+            )
+            return await scoped_agent.invoke(user_query)
+
         state = RecipeExtractionState(user_request=user_query)
-        state_graph = self._create_graph(RecipeExtractionState)
-        return state_graph.invoke(state)
+
+        if self.session is not None:
+            state_graph = self._create_graph(RecipeExtractionState)
+            return await state_graph.ainvoke(state)
+
+        if self.session_factory is None:
+            message = "No database session available. Provide a session or initialize with from_env()."
+            raise ValueError(message)
+
+        async with self.session_factory() as internal_session:
+            scoped_agent = RecipeAgent(
+                llm=self.llm,
+                session=internal_session,
+                session_factory=self.session_factory,
+            )
+            return await scoped_agent.invoke(user_query)
