@@ -3,7 +3,7 @@
 RECIPE_EXTRACTION_PROMPT = """
 Extract a recipe from the following text input. Respond with a valid JSON object only.
 The JSON object should have the following structure:
-```json
+
 {{
     "url": "string",
     "title": "string",
@@ -11,35 +11,48 @@ The JSON object should have the following structure:
     "instructions": "string",
     "labels": "string"
 }}
-```
+
 Text input:
 {text}
 """
 
 USER_INTENT_PROMPT = """
-You are a recipe extraction agent. You will be given a user request and you need to determine the user's intent.
+You are the intent classifier for a recipe assistant. Determine the user's intent from the request below.
 
-The possible intents are:
-1. extract_recipe_from_url: The user wants to extract a recipe from a given URL.
-2. extract_recipe_from_text: The user wants to extract a recipe from a given text input.
-3. search_recipe_in_db: The user wants to search for a recipe in the database
-4. generate_meal_plan: The user wants to generate a meal plan based on their dietary preferences and restrictions.
+Choose exactly one of these intents:
+1. extract_recipe_from_url: The user provides a URL to an existing recipe page and wants that recipe extracted.
+2. extract_recipe_from_text: The user is pasting or providing recipe content directly (ingredients/instructions, a recipe draft, or a recipe description that they want converted into structured data).
+3. search_recipe_in_db: The user is asking for recipe ideas, recommendations, suggestions, summaries, or similar recipes based on a cuisine, ingredient, dish, or general request.
+4. generate_meal_plan: The user explicitly wants a meal plan, weekly plan, or multi-meal dietary schedule.
 
-Return a JSON object with the following structure:
+Important rules:
+- Do NOT use extract_recipe_from_text unless the user is actually giving recipe content or asking to parse a recipe.
+- A request like "Summarize a chicken dinner with a quick ingredient list" is NOT a recipe extraction request; it is a search/recommendation request.
+- If a URL is present, prefer extract_recipe_from_url even if the request also contains extra words.
+- If the request is about searching for recipes, ideas, recommendations, or summaries, use search_recipe_in_db.
+- Only use generate_meal_plan for explicit meal planning requests.
+- If there is no URL, set the url field to "".
+
+Return valid JSON only with this exact shape:
 {{
-    "user_intent": "extract_recipe_from_url",
+    "user_intent": "USER_INTENT",
     "url": "string"
 }}
 
-If there is no URL provided, the "url" field should be an empty string.
+Examples:
+- "https://example.com/recipe" -> {{"user_intent": "extract_recipe_from_url", "url": "https://example.com/recipe"}}
+- "Ingredients: chicken, rice, garlic... Instructions: ..." -> {{"user_intent": "extract_recipe_from_text", "url": ""}}
+- "Summarize a chicken dinner with a quick ingredient list" -> {{"user_intent": "search_recipe_in_db", "url": ""}}
+- "Plan a vegetarian meal plan for 3 days" -> {{"user_intent": "generate_meal_plan", "url": ""}}
 
-The user request is: "{user_request}".
+User request: "{user_request}"
 """
 
 GENERATE_LABELS_PROMPT = """
 You are a recipe extraction agent. You will be given a list of ingredients and instructions and you need to generate a
-list of labels for the recipe. The labels should be relevant to the ingredients and should be in the form of a list
-of strings.
+list of labels for the recipe. The labels should be relevant to the ingredients.
+
+Return valid JSON only as a list of strings.
 
 Recipe ingredients:
 {ingredients}

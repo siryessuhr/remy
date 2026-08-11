@@ -9,7 +9,6 @@ import httpx2
 from bs4 import BeautifulSoup
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger as log
@@ -26,7 +25,7 @@ from remy.database import create_engine, create_session_factory
 from remy.models import BaseRecipeModel, RecipeExtractionState, RecipeModel
 from remy.settings import settings
 from remy.tools.vector_search import vector_similarity_search_tool
-from remy.utils import generate_embeddings
+from remy.utils import generate_embeddings, get_llm, parse_structured_response, with_structured_output
 
 
 class RecipeAgent:
@@ -34,7 +33,7 @@ class RecipeAgent:
 
     def __init__(
         self,
-        llm: ChatOllama,
+        llm,
         session: AsyncSession | None = None,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
@@ -60,11 +59,7 @@ class RecipeAgent:
         session_factory = create_session_factory(engine)
 
         return cls(
-            llm=ChatOllama(
-                base_url=settings.OLLAMA_BASE_URL,
-                model=settings.OLLAMA_MODEL,
-                format="json",
-            ),
+            llm=get_llm(),
             session_factory=session_factory,
         )
 
@@ -110,11 +105,12 @@ class RecipeAgent:
         graph.add_edge("respond_with_search_results", END)
         graph.add_conditional_edges(
             "understand_user_intent",
-            lambda state: state.user_intent,
+            lambda state: state.user_intent.value if state.user_intent is not None else "search_recipe_in_db",
             {
                 "extract_recipe_from_url": "fetch_recipe_from_url",
                 "extract_recipe_from_text": "extract_recipe",
                 "search_recipe_in_db": "respond_with_search_results",
+                "generate_meal_plan": "respond_with_search_results",
             },
         )
 
@@ -146,15 +142,18 @@ class RecipeAgent:
             User intent payload used for graph routing.
         """
         prompt = ChatPromptTemplate.from_template(USER_INTENT_PROMPT)
-        chain = prompt | self.llm
+        structured_llm = with_structured_output(self.llm, dict[str, str])
+        chain = prompt | structured_llm
         log.info("Understanding user intent...")
         response = await chain.ainvoke({"user_request": state.user_request})
         log.debug(f"Raw LLM response: {response}")
-        # pyrefly: ignore [missing-attribute]
-        result = json.loads(response.content.strip())
+        if isinstance(response, dict):
+            result = response
+        else:
+            result = parse_structured_response(response, dict[str, str])
         return {
             "user_intent": result["user_intent"],
-            "url": result.get("url"),
+            "url": result.get("url", ""),
         }
 
     async def _fetch_recipe_from_url(self, state: RecipeExtractionState) -> dict[str, str | None]:
@@ -197,12 +196,16 @@ class RecipeAgent:
             Processed recipe payload validated against BaseRecipeModel.
         """
         prompt = ChatPromptTemplate.from_template(RECIPE_EXTRACTION_PROMPT)
-        chain = prompt | self.llm
+        structured_llm = with_structured_output(self.llm, BaseRecipeModel)
+        chain = prompt | structured_llm
         log.info("Extracting recipe from text input...")
         source_text = state.parsed_body or state.user_request
         response = await chain.ainvoke({"text": source_text})
         log.debug(f"Raw LLM response: {response}")
-        recipe = _parse_recipe_model_from_response(response)
+        if isinstance(response, BaseRecipeModel):
+            recipe = response
+        else:
+            recipe = _parse_recipe_model_from_response(response)
         log.info(f"Extracted recipe: {recipe}")
         # pyrefly: ignore [bad-assignment]
         return {"processed_recipe": recipe}
@@ -218,7 +221,8 @@ class RecipeAgent:
         """
         log.info("Generating labels for the extracted recipe...")
         prompt = ChatPromptTemplate.from_template(GENERATE_LABELS_PROMPT)
-        chain = prompt | self.llm
+        structured_llm = with_structured_output(self.llm, dict[str, list[str]])
+        chain = prompt | structured_llm
         response = await chain.ainvoke(
             {
                 # pyrefly: ignore [missing-attribute]
@@ -228,8 +232,12 @@ class RecipeAgent:
             }
         )
         log.debug(f"Raw LLM response: {response}")
+        if isinstance(response, dict):
+            label_payload = response
+        else:
+            label_payload = parse_structured_response(response, dict[str, list[str]])
         # pyrefly: ignore [missing-attribute]
-        return {"labels": json.loads(response.content.strip())["labels"]}
+        return {"labels": label_payload["labels"]}
 
     async def _generate_embeddings(self, state: RecipeExtractionState) -> dict[str, RecipeModel]:
         """Generate embeddings for both ingredients and instructions.
@@ -282,7 +290,7 @@ class RecipeAgent:
         await self.session.commit()
         await self.session.refresh(recipe)
 
-        log.info(f"Inserted recipe into database for URL: {recipe.url}")
+        log.info(f"Inserted recipe into database: {recipe.title} (ID: {recipe.id})")
         return {"processed_recipe": recipe}
 
     async def _respond_with_search_results(self, state: RecipeExtractionState) -> dict[str, object]:

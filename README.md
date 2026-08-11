@@ -1,4 +1,63 @@
-# Recipe Agent LangGraph Diagrams
+# Recipe Agent Remy
+
+The idea behind the recipe agent was largely selfish - my wife and I enjoy cooking together so how could I potentially leverage an LLM powered application to save recipes to a database (build an app to just view those recipes later), then query recipes using natural language while providing either types of food or ingredients that we had on-hand. Some recipes call for a little cabbage, for instance, but the grocery store typically sells bags that are more than one meal. Having an agent do a little lifting using something like a RAG tool to find multiple recipes that have a common ingredient could be helpful.
+
+This could be more broadly useful to a chef at a restaurant with their own custom recipes and the same predicament - local or seasonal ingredients that you want to ensure all get used to reduce waste.
+
+## Local Setup (no Docker)
+
+If you, like me, have a computer capable of self-hosting LLMs and already have Ollama running, and you don't mind the overhead of setting up and managing a PostgreSQL database...
+
+### Tools required
+
+- `uv` Python environment & dependency manager for backend
+- `npm` Javascript dependency manager for frontend
+- PostgreSQL
+- Either OpenAI access or a local Ollama install
+
+## LLM provider selection
+
+Remy supports both OpenAI and Ollama. The app chooses the provider automatically:
+
+- Default behavior: use OpenAI
+- Override behavior: if `OLLAMA_BASE_URL` and `OLLAMA_MODEL` are both set, use Ollama instead
+- The same logic is used for both chat completion and embeddings
+
+This means you can keep one default setup in `.env` without changing code, and switch to a local Ollama stack simply by filling in the Ollama variables.
+
+### Environment variables
+
+```env
+# Database
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/recipe_agent
+
+# OpenAI (default provider)
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=1536
+
+# Optional Ollama override
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_MODEL=qwen3.6:latest
+# OLLAMA_EMBEDDING_MODEL=qwen3-embedding:latest
+# OLLAMA_EMBEDDING_DIMENSIONS=512
+```
+
+### Which provider is used?
+
+The selection rule is intentionally simple:
+
+```python
+if OLLAMA_BASE_URL and OLLAMA_MODEL:
+    use Ollama
+else:
+    use OpenAI
+```
+
+This keeps the app predictable while still allowing local/self-hosted inference when desired.
+
+> Quick note on embeddings: the model used to generate recipe vectors and the model used to embed search queries must match. If one side uses OpenAI embeddings and the other uses Ollama embeddings, the vectors will not be comparable and similarity search will be unreliable.
 
 ## Database Pre-Setup
 
@@ -34,20 +93,40 @@ uv run python -m remy migrate upgrade head
 
 The startup script runs migrations before launching the API. On a fresh setup with no migration files, it bootstraps the recipe table. Once revision files exist, it runs normal Alembic upgrades.
 
+### Local Ollama example
+
+If you want to use a local Ollama instance instead of OpenAI, uncomment and set:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3.6:latest
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:latest
+OLLAMA_EMBEDDING_DIMENSIONS=512
+```
+
+When these are provided, Remy automatically switches over to Ollama for both chat generation and embedding generation.
+
+## Local Setup with Docker
+
+### Tools required
+
+- Docker
+
 ### Docker quickstart (local)
 
 Use this flow for first-time local setup with Docker Compose:
 
 ```bash
-docker compose up -d postgres
-docker compose ps postgres
-docker compose up -d app
+docker compose up -d
 ```
+
+Then open the frontend at http://localhost:5173.
 
 Notes:
 
 - `app` startup waits for Postgres readiness and runs migrations automatically.
 - The configured Postgres image (`pgvector/pgvector:pg16`) includes pgvector, and the initial migration creates the `vector` extension.
+- The frontend service exposes the Vite dev server on port 5173 and proxies API calls to the backend container.
 
 ## Top-Level Architecture
 
@@ -62,7 +141,6 @@ graph TD
     router -- "URL" --> pathA[Path A: URL Extraction]
     router -- "Recipe text" --> pathB[Path B: Text Extraction]
     router -- "Search recipe" --> pathC[Path C: Recipe Search]
-    router -- "Meal plan" --> pathD[Path D: Meal Planning]
 
     %% Path A — URL extraction
     subgraph "A. URL Extraction"
@@ -91,24 +169,10 @@ graph TD
 
     router -- "Search request" --> searchDb
 
-    %% Path D — Meal plan generation
-    subgraph "D. Meal Planning"
-        evalPlan["evaluate_plan<br/>→ check if user provided<br/>ingredients, restrictions,<br/>preferences"]
-        evalPlan -- insufficient --> askUser["ask_user<br/>→ request missing info"]
-        askUser --> evalPlan
-        evalPlan -- sufficient --> genMealPlan["generate_meal_plan<br/>(LLM)"]
-        genMealPlan --> generateEmbeddings3["generate_embeddings"]
-        generateEmbeddings3 --> generateLabels3["generate_labels"]
-        generateLabels3 --> persistD["persist to db<br/>(database_upsert)"]
-    end
-
-    router -- "Meal plan request" --> evalPlan
-
     %% Final nodes
     persistA --> persistEnd1["✅ Persisted to DB"]
     persistB --> persistEnd2["✅ Persisted to DB"]
     returnRecipe --> searchEnd["✅ Recipe returned<br/>to user"]
-    persistD --> mealEnd["✅ Meal plan persisted"]
 
     classDef startNode fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
     classDef routerNode fill:#fff9c4,stroke:#f9a825,stroke-width:2px;
@@ -119,7 +183,7 @@ graph TD
 
     class user startNode;
     class router decision;
-    class pathA,pathB,pathC,pathD llmNode;
+    class pathA,pathB,pathC llmNode;
     class fetchUrl,parseHtml,persistA,persistB,persistD,searchDb,returnRecipe,askUser toolNode;
     class extractRecipe2,llmNode finalNode;
     class persistEnd1,persistEnd2,searchEnd,mealEnd finalNode;
@@ -226,42 +290,6 @@ graph TD
 
 ---
 
-## Path D — Meal Planning Detail (with iterative loop)
-
-**Trigger:** User requests a weekly meal plan.
-**Flow:** Evaluate user info → ask if insufficient → generate plan → embeddings & labels → persist.
-
-```mermaid
-graph TD
-    router{Intent: Meal<br/>plan?} -- yes --> evalInfo["evaluate_user_info"]
-    router -- no --> other["→ other path"]
-
-    evalInfo -- "missing info" --> askUser["ask_user<br/>(ingredients,<br/>restrictions,<br/>preferences)"]
-    askUser --> userReply["user provides<br/>additional info"]
-    userReply --> evalInfo
-
-    evalInfo -- "sufficient info" --> genPlan["generate_meal_plan<br/>(LLM + database)<br/>→ 7-day plan"]
-
-    genPlan --> mealEmbeddings["generate_embeddings"]
-    mealEmbeddings --> mealLabels["generate_labels<br/>(meal_type, day,<br/>tags)"]
-    mealLabels --> persistMeal["persist to db<br/>(database_upsert)"]
-
-    persistMeal --> planSaved["✅ Meal plan persisted"]
-
-    classDef routerNode fill:#fff9c4,stroke:#f9a825,stroke-width:2px;
-    classDef toolNode fill:#c8e6c9,stroke:#2e7d32,stroke-width:1px;
-    classDef llmNode fill:#fce4ec,stroke:#ad1457,stroke-width:1px,stroke-dasharray:5 5;
-    classDef decision fill:#ffe0b2,stroke:#e65100,stroke-width:1px;
-    classDef finalNode fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px;
-
-    class router,evalInfo decision;
-    class genPlan,llmNodeB llmNode;
-    class askUser,searchDb toolNode;
-    class planSaved finalNode;
-```
-
----
-
 ## Summary Table (Updated)
 
 | Path | Trigger | Node Sequence | End State |
@@ -269,4 +297,3 @@ graph TD
 | **A** — URL Extraction | User submits a URL | `fetch_url` → `parse_html` → `extract_recipe` → `generate_embeddings` → `generate_labels` → `persist to db` | Persisted to DB |
 | **B** — Text Extraction | User pastes recipe text | `extract_recipe` → `generate_embeddings` → `generate_labels` → `persist to db` | Persisted to DB |
 | **C** — Recipe Search | User searches for a recipe | `parse_query` → `search_db_with_vectors` → `format_response` / `empty response` | Returned to user |
-| **D** — Meal Planning | User requests a meal plan | `evaluate_user_info` → _(loop: ask if insufficient)_ → `generate_meal_plan` → `generate_embeddings` → `generate_labels` → `persist to db` | Persisted to DB |

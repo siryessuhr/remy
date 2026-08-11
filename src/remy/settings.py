@@ -7,10 +7,15 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
-    # LLM / Ollama
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "gemma4:31b"
-    OLLAMA_EMBEDDING_MODEL: str = "qwen3-embedding:latest"
+    # LLM provider configuration
+    OPENAI_API_KEY: str | None = None
+    OPENAI_MODEL: str = "gpt-5.6-sol"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_EMBEDDING_DIMENSIONS: int = 512
+
+    OLLAMA_BASE_URL: str | None = None
+    OLLAMA_MODEL: str | None = None
+    OLLAMA_EMBEDDING_MODEL: str | None = None
     OLLAMA_EMBEDDING_DIMENSIONS: int = 512
 
     # LangSmith tracing

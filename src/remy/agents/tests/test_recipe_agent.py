@@ -4,12 +4,13 @@ import json
 
 import pytest
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
 from pydantic import ValidationError
 
 from remy.agents.recipe_agent import RECIPE_EXTRACTION_PROMPT, RecipeAgent
 from remy.models.recipe import BaseRecipeModel
 from remy.settings import settings
+from remy.tools.vector_search import vector_similarity_search
+from remy.utils import get_embeddings_client, get_llm, parse_structured_response, use_ollama
 
 
 class MockLLMResponse:
@@ -28,27 +29,40 @@ class TestRecipeAgentFromEnv:
 
     def test_from_env_creates_instance(self, mocker):
         """Test that from_env returns a RecipeAgent instance."""
-        mock_chat_ollama = mocker.patch("remy.agents.recipe_agent.ChatOllama", autospec=True)
-        mock_chat_ollama.return_value = mocker.MagicMock()
+        mock_llm = mocker.patch("remy.utils.get_llm", autospec=True)
+        mock_llm.return_value = mocker.MagicMock()
 
         agent = RecipeAgent.from_env()
 
         assert isinstance(agent, RecipeAgent)
         assert agent.llm is not None
 
-    def test_from_env_configures_correct_base_url(self, mocker):
-        """Test that from_env configures Ollama with the correct base URL."""
-        expected_base_url = "http://localhost:11434"
+    def test_from_env_defaults_to_openai(self, mocker):
+        """Test that from_env uses the OpenAI factory unless Ollama is configured."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", None)
+        mocker.patch.object(settings, "OLLAMA_MODEL", None)
+        mocker.patch.object(settings, "OPENAI_API_KEY", "test-key")
+        mock_chat_openai = mocker.patch("remy.utils.ChatOpenAI", autospec=True)
+        mock_chat_openai.return_value = mocker.MagicMock()
 
-        mock_chat_ollama = mocker.patch("remy.agents.recipe_agent.ChatOllama", autospec=True)
+        RecipeAgent.from_env()
+
+        mock_chat_openai.assert_called_once()
+
+    def test_from_env_uses_ollama_when_configured(self, mocker):
+        """Test that from_env switches to Ollama when Ollama env vars are set."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+        mocker.patch.object(settings, "OLLAMA_MODEL", "gemma3:4b")
+        mock_chat_ollama = mocker.patch("remy.utils.ChatOllama", autospec=True)
         mock_chat_ollama.return_value = mocker.MagicMock()
 
         RecipeAgent.from_env()
 
         mock_chat_ollama.assert_called_once_with(
-            base_url=expected_base_url,
-            model=settings.OLLAMA_MODEL,
+            base_url="http://localhost:11434",
+            model="gemma3:4b",
             format="json",
+            temperature=0,
         )
 
 
@@ -199,14 +213,121 @@ class TestRecipeAgentIntegration:
 
     def test_recipe_agent_instance_with_mocked_llm(self, mocker):
         """Test creating a RecipeAgent instance with a mocked LLM."""
-        mock_llm = mocker.MagicMock(spec=ChatOllama)
+        mock_llm = mocker.MagicMock()
         agent = RecipeAgent(llm=mock_llm)
 
         assert agent.llm is mock_llm
 
 
+class TestLLMProviderFactories:
+    """Tests for LLM and embedding provider selection."""
+
+    @pytest.mark.asyncio
+    async def test_vector_similarity_search_uses_recipe_model_schema(self, mocker):
+        """Ensure the SQLAlchemy-backed recipe schema is used for semantic search."""
+        recipe = mocker.Mock(
+            id=7,
+            url="https://example.com/pasta",
+            title="Pasta",
+            ingredients="pasta, olive oil",
+            labels="dinner",
+            instructions="Cook pasta",
+        )
+        recipe.ingred_embedding = [0.1, 0.2, 0.3]
+
+        session = mocker.AsyncMock()
+        session.execute = mocker.AsyncMock(return_value=mocker.Mock(all=lambda: [(recipe, 0.25)]))
+
+        session_cm = mocker.MagicMock()
+        session_cm.__aenter__ = mocker.AsyncMock(return_value=session)
+        session_cm.__aexit__ = mocker.AsyncMock(return_value=None)
+
+        engine = mocker.Mock()
+        engine.dispose = mocker.AsyncMock()
+        mocker.patch("remy.tools.vector_search.create_engine", return_value=engine)
+        mocker.patch("remy.tools.vector_search.create_session_factory", return_value=lambda: session_cm)
+
+        results = await vector_similarity_search([0.1, 0.2, 0.3], top_k=5, min_score=0.0)
+
+        assert len(results) == 1
+        assert results[0]["id"] == 7
+        assert results[0]["title"] == "Pasta"
+        assert results[0]["score"] > 0.0
+
+    def test_parse_structured_response_supports_ollama_json_fallback(self):
+        """Test that plain JSON content can be parsed when the model doesn't support structured output."""
+        response = MockLLMResponse('{"user_intent": "search_recipe_in_db", "url": ""}')
+
+        result = parse_structured_response(response, dict[str, str])
+
+        assert result["user_intent"] == "search_recipe_in_db"
+        assert result["url"] == ""
+
+    def test_use_ollama_is_false_by_default(self, mocker):
+        """Test that OpenAI is the default provider when Ollama is unset."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", None)
+        mocker.patch.object(settings, "OLLAMA_MODEL", None)
+
+        assert use_ollama() is False
+
+    def test_use_ollama_true_when_ollama_settings_present(self, mocker):
+        """Test that the factory prefers Ollama when its settings are configured."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+        mocker.patch.object(settings, "OLLAMA_MODEL", "gemma3:4b")
+
+        assert use_ollama() is True
+
+    def test_get_embeddings_client_defaults_to_openai(self, mocker):
+        """Test that embeddings default to OpenAI unless Ollama is configured."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", None)
+        mocker.patch.object(settings, "OLLAMA_MODEL", None)
+        mocker.patch.object(settings, "OPENAI_API_KEY", "test-key")
+        mock_openai_embeddings = mocker.patch("remy.utils.OpenAIEmbeddings", autospec=True)
+        mock_openai_embeddings.return_value = mocker.MagicMock()
+
+        client = get_embeddings_client()
+
+        assert client is not None
+        mock_openai_embeddings.assert_called_once()
+
+    def test_get_llm_returns_ollama_when_configured(self, mocker):
+        """Test that the LLM factory picks Ollama when configured."""
+        mocker.patch.object(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+        mocker.patch.object(settings, "OLLAMA_MODEL", "gemma3:4b")
+        mock_chat_ollama = mocker.patch("remy.utils.ChatOllama", autospec=True)
+        mock_chat_ollama.return_value = mocker.MagicMock()
+
+        llm = get_llm()
+
+        assert llm is not None
+        mock_chat_ollama.assert_called_once_with(
+            base_url="http://localhost:11434",
+            model="gemma3:4b",
+            format="json",
+            temperature=0,
+        )
+
+
 class TestRecipeAgentFromEnvConfig:
     """Additional tests for Ollama configuration."""
+
+    @pytest.mark.asyncio
+    async def test_user_intent_prompt_routes_summary_requests_to_search(self, mocker):
+        """A summary request should not be treated as a recipe-extraction task."""
+        mock_llm = mocker.MagicMock()
+        mock_response = MockLLMResponse(json.dumps({"user_intent": "search_recipe_in_db", "url": ""}))
+        mock_result = mocker.MagicMock()
+        mock_result.ainvoke = mocker.AsyncMock(return_value=mock_response)
+
+        mock_chain = mocker.MagicMock()
+        mock_chain.__or__ = mocker.MagicMock(return_value=mock_result)
+        mocker.patch("remy.agents.recipe_agent.ChatPromptTemplate.from_template", return_value=mock_chain)
+
+        agent = RecipeAgent(llm=mock_llm)
+        state = agent._understand_user_intent(type("State", (), {"user_request": "Summarize a chicken dinner with a quick ingredient list"})())
+
+        intent = await state
+        assert intent["user_intent"] == "search_recipe_in_db"
 
     def test_extract_recipe_passes_text_to_chain(self, mocker):
         """Test that text parameter is correctly passed to LLM chain."""

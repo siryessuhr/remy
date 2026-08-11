@@ -2,9 +2,18 @@
 
 import pytest
 from langchain_core.messages import AIMessage
+from sqlalchemy import Float, literal
 
 from remy.agents.recipe_agent import RecipeAgent
-from remy.models import RecipeExtractionState
+from remy.models import RecipeExtractionState, RecipeModel
+from remy.tools.vector_search import vector_similarity_search
+
+
+def test_vector_distance_expression_returns_float_distance():
+    """Distance queries must produce numeric values, not pgvector objects."""
+    expression = RecipeModel.ingred_embedding.op("<=>", return_type=Float)(literal([0.1, 0.2, 0.3]))
+
+    assert isinstance(expression.type, Float)
 
 
 @pytest.mark.asyncio
@@ -112,3 +121,35 @@ async def test_respond_with_search_results_uses_langchain_tool_and_summarizes(mo
     ]
     # pyrefly: ignore [bad-index]
     assert result["search_response"]["message"] == "Top match found."
+
+
+@pytest.mark.asyncio
+async def test_vector_similarity_search_uses_existing_recipe_schema(mocker):
+    """Search should use the app's RecipeModel schema instead of a langchain-only vector table."""
+    recipe = mocker.Mock(
+        id=7,
+        url="https://example.com/pasta",
+        title="Pasta",
+        ingredients="pasta, olive oil",
+        labels="dinner",
+        instructions="Cook pasta",
+    )
+    recipe.ingred_embedding = [0.1, 0.2, 0.3]
+
+    session = mocker.AsyncMock()
+    session.execute = mocker.AsyncMock(return_value=mocker.Mock(all=lambda: [(recipe, 0.25)]))
+
+    session_cm = mocker.MagicMock()
+    session_cm.__aenter__ = mocker.AsyncMock(return_value=session)
+    session_cm.__aexit__ = mocker.AsyncMock(return_value=None)
+
+    engine = mocker.Mock()
+    engine.dispose = mocker.AsyncMock()
+    mocker.patch("remy.tools.vector_search.create_engine", return_value=engine)
+    mocker.patch("remy.tools.vector_search.create_session_factory", return_value=lambda: session_cm)
+
+    results = await vector_similarity_search([0.1, 0.2, 0.3], top_k=5, min_score=0.0)
+
+    assert results[0]["id"] == 7
+    assert results[0]["title"] == "Pasta"
+    assert results[0]["score"] > 0.0

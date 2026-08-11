@@ -1,10 +1,12 @@
 from typing import Any
 
 from langchain_core.tools import tool
-from langchain_postgres import PGEngine, PGVectorStore
+from sqlalchemy import Float, literal, select
 
+from remy.database import create_engine, create_session_factory
+from remy.models import RecipeModel
 from remy.settings import settings
-from remy.utils import generate_embeddings, get_embeddings_client
+from remy.utils import generate_embeddings
 
 
 def _distance_to_score(distance: float) -> float:
@@ -47,7 +49,7 @@ async def vector_similarity_search(
     table_name: str = "recipes",
     embedding_column: str = "embedding",
     top_k: int = 10,
-    min_score: float = 0.5,
+    min_score: float = 0.15,
 ) -> list[dict[str, Any]]:
     """Perform vector similarity search using langchain_postgres PGVectorStore.
 
@@ -64,35 +66,44 @@ async def vector_similarity_search(
     if not query_embedding:
         return []
 
-    engine = PGEngine.from_connection_string(settings.DATABASE_URL)
+    engine = create_engine(settings.DATABASE_URL)
+    session_factory = create_session_factory(engine)
     try:
-        vector_store = PGVectorStore.create(
-            engine=engine,
-            embedding_service=get_embeddings_client(),
-            table_name=table_name,
-            embedding_column=embedding_column,
-        )
-
-        # pyrefly: ignore [missing-attribute]
-        matches = await vector_store.asimilarity_search_with_score_by_vector(
-            embedding=query_embedding,
-            k=top_k,
-        )
-        return [
-            _document_to_result(document=document, score=_distance_to_score(distance))
-            for document, distance in matches
-            if _distance_to_score(distance) >= min_score
-        ]
+        async with session_factory() as session:
+            query_vector = literal(query_embedding)
+            distance_expression = RecipeModel.ingred_embedding.op("<=>", return_type=Float)(query_vector)
+            statement = (
+                select(RecipeModel, distance_expression.label("distance"))
+                .order_by(distance_expression)
+                .limit(top_k)
+            )
+            result = await session.execute(statement)
+            matches = []
+            for recipe, distance in result.all():
+                score = _distance_to_score(float(distance))
+                if score < min_score:
+                    continue
+                matches.append(
+                    {
+                        "id": recipe.id,
+                        "url": recipe.url,
+                        "title": recipe.title,
+                        "ingredients": recipe.ingredients,
+                        "labels": recipe.labels,
+                        "content": f"{recipe.title}\n{recipe.ingredients}\n{recipe.instructions}",
+                        "score": score,
+                    }
+                )
+            return matches
     finally:
-        # pyrefly: ignore [unused-coroutine]
-        engine.close()
+        await engine.dispose()
 
 
 @tool
 async def vector_similarity_search_tool(
     query: str,
     top_k: int = 8,
-    min_score: float = 0.35,
+    min_score: float = 0.2,
 ) -> list[dict[str, Any]]:
     """Search for recipes semantically similar to a natural-language query.
 
