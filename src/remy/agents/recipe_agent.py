@@ -120,6 +120,22 @@ class RecipeAgent:
 
         return graph.compile()
 
+    def extract_recipe(self, text: str) -> BaseRecipeModel:
+        """Extract a recipe from plain text using a synchronous LLM call.
+
+        Args:
+            text: Raw user-provided recipe text.
+
+        Returns:
+            Parsed recipe model.
+        """
+        prompt = ChatPromptTemplate.from_template(RECIPE_EXTRACTION_PROMPT)
+        chain = prompt | self.llm
+        log.info("Extracting recipe from text input (sync).")
+        response = chain.invoke({"text": text})
+        log.debug(f"Raw LLM response: {response}")
+        return _parse_recipe_model_from_response(response)
+
     async def _understand_user_intent(self, state: RecipeExtractionState) -> dict[str, str | None]:
         """Understand the user's intent from their request.
 
@@ -186,8 +202,7 @@ class RecipeAgent:
         source_text = state.parsed_body or state.user_request
         response = await chain.ainvoke({"text": source_text})
         log.debug(f"Raw LLM response: {response}")
-        # pyrefly: ignore [missing-attribute]
-        recipe = BaseRecipeModel.model_validate_json(response.content.strip())
+        recipe = _parse_recipe_model_from_response(response)
         log.info(f"Extracted recipe: {recipe}")
         # pyrefly: ignore [bad-assignment]
         return {"processed_recipe": recipe}
@@ -464,3 +479,16 @@ def _normalize_search_matches(tool_output: Any) -> list[dict[str, Any]]:
         return []
 
     return [item for item in tool_output if isinstance(item, dict)]
+
+
+def _parse_recipe_model_from_response(response: object) -> BaseRecipeModel:
+    """Parse a recipe model from an LLM response object.
+
+    Args:
+        response: LLM response that is expected to include a ``content`` attribute.
+
+    Returns:
+        Parsed base recipe model.
+    """
+    raw_content = str(getattr(response, "content", "")).strip()
+    return BaseRecipeModel.model_validate_json(raw_content)
