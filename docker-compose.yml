@@ -1,0 +1,62 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: remy-app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-recipe_agent}
+      OLLAMA_BASE_URL: http://localhost:11434
+      LANGSMITH_TRACING_V2: "${LANGSMITH_TRACING_V2:-false}"
+    volumes:
+      - ./src:/app/src  # hot-reload during dev
+      - .env:/app/.env:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: remy-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-recipe_agent}
+    ports:
+      - "5432:5432"  # only expose if you need local dev access
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-recipe_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  llm:
+    image: ollama/ollama:latest
+    container_name: remy-llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama  # persist downloaded models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+  ollama_data:
