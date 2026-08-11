@@ -232,10 +232,19 @@ class RecipeAgent:
             }
         )
         log.debug(f"Raw LLM response: {response}")
-        if isinstance(response, dict):
+
+        if isinstance(response, list):
+            label_payload = {"labels": response}
+        elif isinstance(response, dict):
             label_payload = response
         else:
             label_payload = parse_structured_response(response, dict[str, list[str]])
+            if isinstance(label_payload, list):
+                label_payload = {"labels": label_payload}
+        if not isinstance(label_payload, dict) or "labels" not in label_payload:
+            message = f"Label generation did not return a valid labels payload: {label_payload!r}"
+            raise ValueError(message)
+
         # pyrefly: ignore [missing-attribute]
         return {"labels": label_payload["labels"]}
 

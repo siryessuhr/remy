@@ -52,7 +52,10 @@ GENERATE_LABELS_PROMPT = """
 You are a recipe extraction agent. You will be given a list of ingredients and instructions and you need to generate a
 list of labels for the recipe. The labels should be relevant to the ingredients.
 
-Return valid JSON only as a list of strings.
+Return valid JSON only with this exact shape:
+{{
+    "labels": ["string", "string", "string"]
+}}
 
 Recipe ingredients:
 {ingredients}

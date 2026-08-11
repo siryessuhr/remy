@@ -1,5 +1,6 @@
 """Tests for the recipe_agent module."""
 
+import asyncio
 import json
 
 import pytest
@@ -185,6 +186,34 @@ class TestRecipeAgentExtractRecipe:
         with pytest.raises(ValidationError):
             # pyrefly: ignore [missing-attribute]
             agent.extract_recipe("test input")
+
+    def test_generate_labels_accepts_list_response(self, mocker):
+        """Tests that list-based JSON label responses are normalized to the expected schema."""
+        mock_llm = mocker.MagicMock()
+        mock_response = MockLLMResponse('["chicken", "grilled", "high-protein"]')
+        mock_result = mocker.MagicMock()
+        mock_result.ainvoke = mocker.AsyncMock(return_value=mock_response)
+
+        mock_chain = mocker.MagicMock()
+        mock_chain.__or__ = mocker.MagicMock(return_value=mock_result)
+
+        mocker.patch("remy.agents.recipe_agent.ChatPromptTemplate.from_template", return_value=mock_chain)
+        agent = RecipeAgent(llm=mock_llm)
+        state = type(
+            "State",
+            (),
+            {
+                "processed_recipe": type(
+                    "Recipe",
+                    (),
+                    {"ingredients": "chicken, yogurt", "instructions": "grill until done"},
+                )()
+            },
+        )()
+
+        result = asyncio.run(agent._generate_labels(state))
+
+        assert result["labels"] == ["chicken", "grilled", "high-protein"]
 
 
 class TestRecipeAgentIntegration:

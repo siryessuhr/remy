@@ -2,6 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS build
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+ENV UV_NO_DEV=1
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN useradd --create-home --uid 1001 --shell /bin/bash appuser
