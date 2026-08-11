@@ -130,7 +130,7 @@ Notes:
 
 ## Top-Level Architecture
 
-Single entry point with intent-based routing to 4 parallel paths. Each path handles a specific user intent (URL extraction, text extraction, recipe search, or meal planning) and converges to an appropriate final state.
+Single entry point with intent-based routing to 3 parallel paths. Each path handles a specific user intent (URL extraction, text extraction, or recipe search) and converges to an appropriate final state.
 
 ### Unified Graph
 
@@ -159,15 +159,15 @@ graph TD
         generateLabels2 --> persistB["persist to db<br/>(database_upsert)"]
     end
 
-    router -- URL --> fetchUrl
-    router -- "Text recipe" --> extractRecipe2
+    pathA --> fetchUrl
+    pathB --> extractRecipe2
 
     %% Path C — Recipe search
     subgraph "C. Recipe Search"
         searchDb["search_db_with_vectors<br/>(pgvector cosine distance)"] --> returnRecipe["return_recipe<br/>(formatted response)"]
     end
 
-    router -- "Search request" --> searchDb
+    pathC --> searchDb
 
     %% Final nodes
     persistA --> persistEnd1["✅ Persisted to DB"]
@@ -184,9 +184,9 @@ graph TD
     class user startNode;
     class router decision;
     class pathA,pathB,pathC llmNode;
-    class fetchUrl,parseHtml,persistA,persistB,persistD,searchDb,returnRecipe,askUser toolNode;
-    class extractRecipe2,llmNode finalNode;
-    class persistEnd1,persistEnd2,searchEnd,mealEnd finalNode;
+    class fetchUrl,parseHtml,generateEmbeddings1,generateLabels1,persistA,generateEmbeddings2,generateLabels2,persistB,searchDb,returnRecipe toolNode;
+    class extractRecipe1,extractRecipe2 llmNode;
+    class persistEnd1,persistEnd2,searchEnd finalNode;
 ```
 
 ---
@@ -290,10 +290,26 @@ graph TD
 
 ---
 
-## Summary Table (Updated)
+## Design Notes
 
-| Path | Trigger | Node Sequence | End State |
-|------|---------|---------------|-----------|
-| **A** — URL Extraction | User submits a URL | `fetch_url` → `parse_html` → `extract_recipe` → `generate_embeddings` → `generate_labels` → `persist to db` | Persisted to DB |
-| **B** — Text Extraction | User pastes recipe text | `extract_recipe` → `generate_embeddings` → `generate_labels` → `persist to db` | Persisted to DB |
-| **C** — Recipe Search | User searches for a recipe | `parse_query` → `search_db_with_vectors` → `format_response` / `empty response` | Returned to user |
+- I have been interested in self-hosting apps at home for many reasons, so leveraging Ollama was a priority - unfortunately I have some performance issues I need to resolve with my Ollama configuration. I decided to add OpenAI support after some slow development cycles and to better support execution by others.
+
+- The frontend is extremely simple and basically forwards all information to the user - this is because the current audience is technical.
+
+- I set it up so that the only database write interactions are static and not provided as a tool to an LLM. The vector similarity search as a LangChain tool seems like a reasonable tradeoff for security purposes on the database.
+
+- All agent nodes & edges are defined in a single class but this could absolutely be designed as an agent of agents.
+
+## What I would improve given more time
+
+- I don't love the agent class - I think there's some opportunity for clean-up, refinement, refactor, etc, especially around readability.
+
+- Refactor the frontend to be less logger verbose (which I kept for demonstration purposes), and return better natural language responses.
+
+- Add a "manual" recipe look up - don't make it exclusively via LLM/agent.
+
+- My first intuitive step is to write Python as a backend application then forward that to a frontend in a different language. Since LangChain supports Javascript/Typescript, I think it would be interesting to approach this entirely in Javascript/Typescript instead.
+
+- Some models across OpenAI and Ollama support varying levels of structured outputs and even tool calling. Since both are critical to this workflow, I would add more guardrails around configuration.
+
+- I spent a fair amount of time on little things that improve or manage extensibility - Alembic for database management, uv with Docker, some tests. I would improve all of these with more time.
