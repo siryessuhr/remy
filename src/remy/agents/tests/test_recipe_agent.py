@@ -353,7 +353,9 @@ class TestRecipeAgentFromEnvConfig:
         mocker.patch("remy.agents.recipe_agent.ChatPromptTemplate.from_template", return_value=mock_chain)
 
         agent = RecipeAgent(llm=mock_llm)
-        state = agent._understand_user_intent(type("State", (), {"user_request": "Summarize a chicken dinner with a quick ingredient list"})())
+        state = agent._understand_user_intent(
+            type("State", (), {"user_request": "Summarize a chicken dinner with a quick ingredient list"})()
+        )
 
         intent = await state
         assert intent["user_intent"] == "search_recipe_in_db"

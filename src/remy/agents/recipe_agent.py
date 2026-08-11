@@ -147,10 +147,7 @@ class RecipeAgent:
         log.info("Understanding user intent...")
         response = await chain.ainvoke({"user_request": state.user_request})
         log.debug(f"Raw LLM response: {response}")
-        if isinstance(response, dict):
-            result = response
-        else:
-            result = parse_structured_response(response, dict[str, str])
+        result = response if isinstance(response, dict) else parse_structured_response(response, dict[str, str])
         return {
             "user_intent": result["user_intent"],
             "url": result.get("url", ""),
@@ -202,10 +199,7 @@ class RecipeAgent:
         source_text = state.parsed_body or state.user_request
         response = await chain.ainvoke({"text": source_text})
         log.debug(f"Raw LLM response: {response}")
-        if isinstance(response, BaseRecipeModel):
-            recipe = response
-        else:
-            recipe = _parse_recipe_model_from_response(response)
+        recipe = response if isinstance(response, BaseRecipeModel) else _parse_recipe_model_from_response(response)
         log.info(f"Extracted recipe: {recipe}")
         # pyrefly: ignore [bad-assignment]
         return {"processed_recipe": recipe}
@@ -422,11 +416,12 @@ class RecipeAgent:
             raise ValueError(message)
 
         state = state.model_copy(update=await self._insert_to_db(state))
+        confirmation_message = _build_recipe_added_message(state.processed_recipe)
         yield {
             "type": "result",
             "payload": {
                 "user_request": user_query,
-                "recipe": state.processed_recipe.model_dump() if state.processed_recipe else None,
+                "response": {"message": confirmation_message},
             },
         }
 
@@ -496,6 +491,25 @@ def _normalize_search_matches(tool_output: Any) -> list[dict[str, Any]]:
         return []
 
     return [item for item in tool_output if isinstance(item, dict)]
+
+
+def _build_recipe_added_message(recipe: BaseRecipeModel | RecipeModel | None) -> str:
+    """Build a user-facing confirmation after recipe persistence.
+
+    Args:
+        recipe: Persisted recipe payload from the graph state.
+
+    Returns:
+        Natural-language confirmation message for API responses.
+    """
+    if recipe is None:
+        return "Your recipe was added to the database."
+
+    recipe_title = getattr(recipe, "title", "")
+    if isinstance(recipe_title, str) and recipe_title.strip():
+        return f"Added '{recipe_title.strip()}' to your recipe collection."
+
+    return "Your recipe was added to the database."
 
 
 def _parse_recipe_model_from_response(response: object) -> BaseRecipeModel:

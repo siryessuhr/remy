@@ -65,6 +65,36 @@ async def test_stream_search_intent_emits_semantic_results(mocker):
 
 
 @pytest.mark.asyncio
+async def test_stream_extraction_intent_returns_added_recipe_message(mocker):
+    """Extraction intent should return a user confirmation after persistence."""
+
+    agent = RecipeAgent(llm=mocker.MagicMock())
+
+    mocker.patch.object(
+        agent,
+        "_understand_user_intent",
+        return_value={"user_intent": "extract_recipe_from_text", "url": ""},
+    )
+    mocker.patch.object(agent, "_extract_recipe", return_value={"processed_recipe": mocker.Mock()})
+    mocker.patch.object(agent, "_generate_labels", return_value={"labels": ["dinner"]})
+    mocker.patch.object(agent, "_generate_embeddings", return_value={"processed_recipe": mocker.Mock()})
+    mocker.patch.object(
+        agent,
+        "_insert_to_db",
+        return_value={"processed_recipe": mocker.Mock(title="Tomato Soup")},
+    )
+
+    # pyrefly: ignore [bad-argument-type]
+    events = [event async for event in agent._stream_with_session("add this recipe", session=object())]
+
+    assert events[-1]["type"] == "result"
+    # pyrefly: ignore [bad-index]
+    assert events[-1]["payload"]["response"]["message"] == "Added 'Tomato Soup' to your recipe collection."
+    # pyrefly: ignore [bad-index]
+    assert "recipe" not in events[-1]["payload"]
+
+
+@pytest.mark.asyncio
 async def test_respond_with_search_results_uses_langchain_tool_and_summarizes(mocker):
     """Search response node should call the tool and summarize returned matches."""
 

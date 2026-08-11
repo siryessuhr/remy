@@ -1,13 +1,11 @@
 import json
-from typing import Any, TypeVar, get_origin
+from typing import Any, get_origin
 
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from loguru import logger as log
 
 from remy.settings import settings
-
-T = TypeVar("T")
 
 
 def use_ollama() -> bool:
@@ -73,7 +71,7 @@ def get_embeddings_client():
     )
 
 
-def with_structured_output(model: Any, schema: type[T]) -> Any:
+def with_structured_output[T](model: Any, schema: type[T]) -> Any:
     """Return a model wrapper that supports structured output across providers.
 
     OpenAI models support ``with_structured_output`` directly. Ollama models do not,
@@ -95,7 +93,7 @@ def with_structured_output(model: Any, schema: type[T]) -> Any:
     return model
 
 
-def parse_structured_response(response: Any, schema: type[T] | dict[str, Any]) -> T:
+def parse_structured_response[T](response: Any, schema: type[T] | dict[str, Any]) -> T:
     """Parse JSON content from a model response into the requested schema.
 
     Args:

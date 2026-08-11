@@ -1,5 +1,7 @@
 """Tests for the CLI bootstrap helpers."""
 
+from typing import Self
+
 from remy import __main__ as main_mod
 
 
@@ -13,14 +15,14 @@ def test_initialize_database_schema_enables_pgvector_before_create_all(monkeypat
         def execute(self, statement) -> None:
             self.executed_statements.append(str(statement))
 
-        def __enter__(self) -> "FakeConnection":
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, exc_type, exc, tb) -> bool:
             return False
 
     class FakeEngine:
-        def __init__(self, *args, **kwargs) -> None:  # noqa: ARG002
+        def __init__(self, *args, **kwargs) -> None:
             self.connection = FakeConnection()
 
         def begin(self) -> FakeConnection:
@@ -29,12 +31,12 @@ def test_initialize_database_schema_enables_pgvector_before_create_all(monkeypat
         def dispose(self) -> None:
             return None
 
-    def fake_create_engine(*args, **kwargs):  # noqa: ARG002
+    def fake_create_engine(*args, **kwargs):
         return FakeEngine()
 
     created_tables: list[object] = []
 
-    def fake_create_all(connection, tables) -> None:  # noqa: ARG002
+    def fake_create_all(connection, tables) -> None:
         created_tables.append(tables)
         assert any("CREATE EXTENSION IF NOT EXISTS vector" in statement for statement in connection.executed_statements)
 

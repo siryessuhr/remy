@@ -73,9 +73,7 @@ async def vector_similarity_search(
             query_vector = literal(query_embedding)
             distance_expression = RecipeModel.ingred_embedding.op("<=>", return_type=Float)(query_vector)
             statement = (
-                select(RecipeModel, distance_expression.label("distance"))
-                .order_by(distance_expression)
-                .limit(top_k)
+                select(RecipeModel, distance_expression.label("distance")).order_by(distance_expression).limit(top_k)
             )
             result = await session.execute(statement)
             matches = []

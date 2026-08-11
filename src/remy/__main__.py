@@ -5,11 +5,11 @@ from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
 from pathlib import Path
 
+import sqlalchemy
 import uvicorn
 from alembic.config import Config
 from dotenv import load_dotenv
 from loguru import logger as log
-import sqlalchemy
 from sqlalchemy import create_engine
 
 from alembic import command
