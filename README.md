@@ -304,6 +304,8 @@ graph TD
 
 - I don't love the agent class - I think there's some opportunity for clean-up, refinement, refactor, etc, especially around readability.
 
+- Sometimes when providing a URL, the server will return something that cannot be properly parsed - need to harden here.
+
 - Refactor the frontend to be less logger verbose (which I kept for demonstration purposes), and return better natural language responses.
 
 - Add a "manual" recipe look up - don't make it exclusively via LLM/agent.
