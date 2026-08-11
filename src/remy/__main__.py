@@ -91,6 +91,7 @@ def _initialize_database_schema(database_url: str) -> None:
     sync_database_url = _normalize_database_url_for_alembic(database_url)
     engine = create_engine(sync_database_url, echo=False)
     with engine.begin() as connection:
+        # pyrefly: ignore [missing-attribute]
         RecipeModel.metadata.create_all(connection, tables=[RecipeModel.__table__])
 
     engine.dispose()

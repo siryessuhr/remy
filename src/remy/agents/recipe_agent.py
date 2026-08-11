@@ -3,22 +3,29 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Self
+from typing import Any, Self
 
 import httpx2
 from bs4 import BeautifulSoup
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger as log
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from remy.agents.prompts import GENERATE_LABELS_PROMPT, RECIPE_EXTRACTION_PROMPT, USER_INTENT_PROMPT
+from remy.agents.prompts import (
+    GENERATE_LABELS_PROMPT,
+    RECIPE_EXTRACTION_PROMPT,
+    SEARCH_RECIPES_RESPONSE_PROMPT,
+    USER_INTENT_PROMPT,
+)
 from remy.database import create_engine, create_session_factory
 from remy.models import BaseRecipeModel, RecipeExtractionState, RecipeModel
 from remy.settings import settings
+from remy.tools.vector_search import vector_similarity_search_tool
 from remy.utils import generate_embeddings
 
 
@@ -90,6 +97,7 @@ class RecipeAgent:
         graph.add_node("generate_labels", self._generate_labels)
         graph.add_node("generate_embeddings", self._generate_embeddings)
         graph.add_node("insert_to_db", self._insert_to_db)
+        graph.add_node("respond_with_search_results", self._respond_with_search_results)
 
         graph.set_entry_point("understand_user_intent")
 
@@ -98,12 +106,15 @@ class RecipeAgent:
         graph.add_edge("extract_recipe", "generate_labels")
         graph.add_edge("generate_labels", "generate_embeddings")
         graph.add_edge("generate_embeddings", "insert_to_db")
+        graph.add_edge("insert_to_db", END)
+        graph.add_edge("respond_with_search_results", END)
         graph.add_conditional_edges(
             "understand_user_intent",
             lambda state: state.user_intent,
             {
                 "extract_recipe_from_url": "fetch_recipe_from_url",
                 "extract_recipe_from_text": "extract_recipe",
+                "search_recipe_in_db": "respond_with_search_results",
             },
         )
 
@@ -123,6 +134,7 @@ class RecipeAgent:
         log.info("Understanding user intent...")
         response = await chain.ainvoke({"user_request": state.user_request})
         log.debug(f"Raw LLM response: {response}")
+        # pyrefly: ignore [missing-attribute]
         result = json.loads(response.content.strip())
         return {
             "user_intent": result["user_intent"],
@@ -174,8 +186,10 @@ class RecipeAgent:
         source_text = state.parsed_body or state.user_request
         response = await chain.ainvoke({"text": source_text})
         log.debug(f"Raw LLM response: {response}")
+        # pyrefly: ignore [missing-attribute]
         recipe = BaseRecipeModel.model_validate_json(response.content.strip())
         log.info(f"Extracted recipe: {recipe}")
+        # pyrefly: ignore [bad-assignment]
         return {"processed_recipe": recipe}
 
     async def _generate_labels(self, state: RecipeExtractionState) -> dict[str, str | None]:
@@ -192,11 +206,14 @@ class RecipeAgent:
         chain = prompt | self.llm
         response = await chain.ainvoke(
             {
+                # pyrefly: ignore [missing-attribute]
                 "ingredients": state.processed_recipe.ingredients,
+                # pyrefly: ignore [missing-attribute]
                 "instructions": state.processed_recipe.instructions,
             }
         )
         log.debug(f"Raw LLM response: {response}")
+        # pyrefly: ignore [missing-attribute]
         return {"labels": json.loads(response.content.strip())["labels"]}
 
     async def _generate_embeddings(self, state: RecipeExtractionState) -> dict[str, RecipeModel]:
@@ -209,13 +226,16 @@ class RecipeAgent:
             Recipe model enriched with vector embeddings.
         """
         log.info("Generate embeddings for recipe ingredients & instructions.")
+        # pyrefly: ignore [missing-attribute]
         ing_embed = await asyncio.to_thread(generate_embeddings, state.processed_recipe.ingredients)
+        # pyrefly: ignore [missing-attribute]
         inst_embed = await asyncio.to_thread(generate_embeddings, state.processed_recipe.instructions)
 
         recipe = RecipeModel(
             ingred_embedding=ing_embed,
             instru_embedding=inst_embed,
             labels=f"{state.labels}",
+            # pyrefly: ignore [missing-attribute]
             **state.processed_recipe.model_dump(),
         )
         log.debug(f"Final recipe model: {recipe}")
@@ -249,6 +269,51 @@ class RecipeAgent:
 
         log.info(f"Inserted recipe into database for URL: {recipe.url}")
         return {"processed_recipe": recipe}
+
+    async def _respond_with_search_results(self, state: RecipeExtractionState) -> dict[str, object]:
+        """Generate guarded recommendations with LLM tool-calling.
+
+        Args:
+            state: Current recipe extraction state.
+
+        Returns:
+            Payload containing retrieved matches and a summarized recommendation.
+        """
+        prompt = ChatPromptTemplate.from_template(SEARCH_RECIPES_RESPONSE_PROMPT)
+        prompt_messages = prompt.format_messages(user_request=state.user_request)
+        llm_with_tools = self.llm.bind_tools([vector_similarity_search_tool])
+        initial_response = await llm_with_tools.ainvoke(prompt_messages)
+
+        if not isinstance(initial_response, AIMessage):
+            fallback = _parse_search_response(str(getattr(initial_response, "content", "")))
+            return {"search_results": [], "search_response": fallback}
+
+        tool_calls = list(initial_response.tool_calls or [])
+        if not tool_calls:
+            parsed_response = _parse_search_response(str(initial_response.content))
+            return {"search_results": [], "search_response": parsed_response}
+
+        first_tool_call = tool_calls[0]
+        tool_args = first_tool_call.get("args", {})
+        tool_output = await vector_similarity_search_tool.ainvoke(tool_args)
+        matches = _normalize_search_matches(tool_output)
+        log.info("Tool retrieved {} semantically similar recipes.", len(matches))
+
+        tool_message = ToolMessage(
+            content=json.dumps(matches),
+            tool_call_id=str(first_tool_call.get("id", "vector-search-call")),
+        )
+        final_response = await llm_with_tools.ainvoke(
+            [
+                *prompt_messages,
+                initial_response,
+                tool_message,
+            ]
+        )
+
+        final_content = str(getattr(final_response, "content", ""))
+        parsed_response = _parse_search_response(final_content)
+        return {"search_results": matches, "search_response": parsed_response}
 
     async def stream(self, user_query: str, session: AsyncSession | None = None) -> AsyncIterator[dict[str, object]]:
         """Stream recipe-agent progress updates while processing a user query."""
@@ -291,6 +356,20 @@ class RecipeAgent:
 
         intent_state = await self._understand_user_intent(state)
         state = state.model_copy(update=intent_state)
+
+        if state.user_intent == "search_recipe_in_db":
+            yield {"type": "progress", "message": "Searching and preparing recommendations..."}
+            state = state.model_copy(update=await self._respond_with_search_results(state))
+            yield {
+                "type": "result",
+                "payload": {
+                    "user_request": user_query,
+                    "matched_recipes": state.search_results,
+                    "response": state.search_response,
+                },
+            }
+            return
+
         if state.user_intent == "extract_recipe_from_url":
             yield {"type": "progress", "message": "Fetching the recipe from the provided URL..."}
             state = state.model_copy(update=await self._fetch_recipe_from_url(state))
@@ -346,3 +425,42 @@ class RecipeAgent:
                 session_factory=self.session_factory,
             )
             return await scoped_agent.invoke(user_query)
+
+
+def _parse_search_response(raw_content: str) -> dict[str, object]:
+    """Parse search-response JSON from the LLM with a defensive fallback.
+
+    Args:
+        raw_content: Raw string emitted by the LLM.
+
+    Returns:
+        Parsed response dictionary with message and recommendations.
+    """
+    try:
+        parsed = json.loads(raw_content.strip())
+    except json.JSONDecodeError:
+        return {"message": raw_content.strip(), "recommendations": []}
+
+    message = parsed.get("message")
+    recommendations = parsed.get("recommendations")
+    if not isinstance(message, str):
+        message = "Here are the closest matching recipes I found."
+    if not isinstance(recommendations, list):
+        recommendations = []
+
+    return {"message": message, "recommendations": recommendations}
+
+
+def _normalize_search_matches(tool_output: Any) -> list[dict[str, Any]]:
+    """Normalize vector-search tool output to a list of dictionaries.
+
+    Args:
+        tool_output: Raw payload returned by the LangChain tool.
+
+    Returns:
+        List of dictionary search results.
+    """
+    if not isinstance(tool_output, list):
+        return []
+
+    return [item for item in tool_output if isinstance(item, dict)]

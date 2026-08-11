@@ -78,6 +78,7 @@ class TestRecipeAgentExtractRecipe:
             return_value=mock_chain,
         )
         agent = RecipeAgent(llm=mock_llm)
+        # pyrefly: ignore [missing-attribute]
         result = agent.extract_recipe("Some recipe text")
 
         assert isinstance(result, BaseRecipeModel)
@@ -111,6 +112,7 @@ class TestRecipeAgentExtractRecipe:
         )
         agent = RecipeAgent(llm=mock_llm)
         test_input = "How to make a cake?"
+        # pyrefly: ignore [missing-attribute]
         agent.extract_recipe(test_input)
 
         # Verify the invoke was called with the text parameter
@@ -143,6 +145,7 @@ class TestRecipeAgentExtractRecipe:
             return_value=mock_chain,
         )
         agent = RecipeAgent(llm=mock_llm)
+        # pyrefly: ignore [missing-attribute]
         result = agent.extract_recipe("test input")
 
         assert isinstance(result, BaseRecipeModel)
@@ -166,6 +169,7 @@ class TestRecipeAgentExtractRecipe:
         agent = RecipeAgent(llm=mock_llm)
 
         with pytest.raises(ValidationError):
+            # pyrefly: ignore [missing-attribute]
             agent.extract_recipe("test input")
 
 
@@ -229,6 +233,7 @@ class TestRecipeAgentFromEnvConfig:
         )
         agent = RecipeAgent(llm=mock_llm)
         test_text = "Test recipe input"
+        # pyrefly: ignore [missing-attribute]
         agent.extract_recipe(test_text)
 
         mock_invoke.assert_called_once()

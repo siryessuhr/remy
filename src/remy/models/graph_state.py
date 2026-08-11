@@ -1,8 +1,9 @@
 """LangGraph state models for Remy the Recipe Agent."""
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from remy.models.recipe import BaseRecipeModel, RecipeModel
 
@@ -29,3 +30,5 @@ class RecipeExtractionState(BaseModel):
     processed_recipe: BaseRecipeModel | RecipeModel | None = None
     labels: list[str] = []
     is_recipe_in_db: bool = False
+    search_results: list[dict[str, Any]] = Field(default_factory=list)
+    search_response: dict[str, Any] = Field(default_factory=dict)

@@ -71,3 +71,9 @@ sequence = [
     "ruff check",
     "pyrefly check",
 ]
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]

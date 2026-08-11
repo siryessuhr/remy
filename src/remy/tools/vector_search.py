@@ -1,9 +1,10 @@
 from typing import Any
 
+from langchain_core.tools import tool
 from langchain_postgres import PGEngine, PGVectorStore
 
 from remy.settings import settings
-from remy.utils import get_embeddings_client
+from remy.utils import generate_embeddings, get_embeddings_client
 
 
 def _distance_to_score(distance: float) -> float:
@@ -72,6 +73,7 @@ async def vector_similarity_search(
             embedding_column=embedding_column,
         )
 
+        # pyrefly: ignore [missing-attribute]
         matches = await vector_store.asimilarity_search_with_score_by_vector(
             embedding=query_embedding,
             k=top_k,
@@ -82,21 +84,29 @@ async def vector_similarity_search(
             if _distance_to_score(distance) >= min_score
         ]
     finally:
+        # pyrefly: ignore [unused-coroutine]
         engine.close()
 
 
+@tool
 async def vector_similarity_search_tool(
-    query_embedding: list[float],
-    table_name: str = "recipes",
-    embedding_column: str = "embedding",
-    top_k: int = 10,
-    min_score: float = 0.5,
+    query: str,
+    top_k: int = 8,
+    min_score: float = 0.35,
 ) -> list[dict[str, Any]]:
-    """Tool wrapper for vector similarity search."""
+    """Search for recipes semantically similar to a natural-language query.
+
+    Args:
+        query: User request or recipe description to search for.
+        top_k: Maximum number of recipes to return.
+        min_score: Minimum similarity score threshold in [0.0, 1.0].
+
+    Returns:
+        Ranked recipe matches with metadata and score.
+    """
+    query_embedding = generate_embeddings(query)
     return await vector_similarity_search(
         query_embedding,
-        table_name=table_name,
-        embedding_column=embedding_column,
         top_k=top_k,
         min_score=min_score,
     )
