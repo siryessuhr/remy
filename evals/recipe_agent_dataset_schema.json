@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://remy.example/schemas/recipe-agent-langsmith-dataset.schema.json",
+  "title": "Remy Recipe Agent LangSmith Dataset",
+  "type": "object",
+  "required": ["dataset_name", "schema_version", "description", "examples"],
+  "properties": {
+    "dataset_name": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "description": {"type": "string"},
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["inputs", "outputs"],
+        "properties": {
+          "inputs": {
+            "type": "object",
+            "required": ["user_request"],
+            "properties": {
+              "user_request": {"type": "string"},
+              "url": {"type": "string"}
+            },
+            "additionalProperties": false
+          },
+          "outputs": {
+            "type": "object",
+            "required": ["user_intent"],
+            "properties": {
+              "user_intent": {
+                "type": "string",
+                "enum": [
+                  "extract_recipe_from_url",
+                  "extract_recipe_from_text",
+                  "search_recipe_in_db",
+                  "generate_meal_plan"
+                ]
+              },
+              "url": {"type": "string"},
+              "processed_recipe": {
+                "type": ["object", "null"],
+                "properties": {
+                  "url": {"type": "string"},
+                  "title": {"type": "string"},
+                  "ingredients": {"type": "string"},
+                  "instructions": {"type": "string"}
+                },
+                "required": ["title", "ingredients", "instructions"],
+                "additionalProperties": false
+              },
+              "labels": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "search_results": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {"type": "string"},
+                    "score": {"type": "number"},
+                    "labels": {"type": "array", "items": {"type": "string"}}
+                  },
+                  "required": ["title"],
+                  "additionalProperties": true
+                }
+              },
+              "search_response": {
+                "type": "object",
+                "properties": {
+                  "message": {"type": "string"},
+                  "count": {"type": "integer"},
+                  "top_match": {"type": "string"}
+                },
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

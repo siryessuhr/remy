@@ -1,0 +1,258 @@
+[
+  {
+    "inputs": {
+      "user_request": "Write a quick weeknight recipe for lemon garlic chicken with rice.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Lemon Garlic Chicken and Rice",
+        "ingredients": "chicken thighs, rice, garlic, lemon, olive oil, salt, pepper, parsley",
+        "instructions": "Cook the rice. Sear the chicken in olive oil until browned. Add garlic, lemon juice, salt, and pepper. Return the chicken to the pan and simmer until cooked through. Serve over rice and garnish with parsley."
+      },
+      "labels": ["dinner", "quick", "chicken", "comfort"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "I'm looking for a vegetarian pasta recipe with spinach and garlic.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Garlic Spinach Pasta",
+        "ingredients": "spaghetti, spinach, garlic, olive oil, parmesan, lemon zest, salt, black pepper",
+        "instructions": "Boil the spaghetti. Sauté garlic in olive oil. Add spinach and cook until wilted. Toss pasta with the spinach mixture. Finish with parmesan, lemon zest, salt, and pepper."
+      },
+      "labels": ["vegetarian", "pasta", "easy", "quick"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Give me a recipe for beef tacos with cilantro lime slaw.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Cilantro Lime Beef Tacos",
+        "ingredients": "ground beef, taco seasoning, tortillas, cabbage, lime, cilantro, mayonnaise, salt, pepper",
+        "instructions": "Cook the beef with taco seasoning. Toss shredded cabbage with lime juice, cilantro, mayonnaise, salt, and pepper. Warm tortillas. Fill tortillas with beef and slaw."
+      },
+      "labels": ["tacos", "beef", "family", "mexican"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "I want a soup recipe with carrots, ginger, and coconut milk.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Carrot Ginger Coconut Soup",
+        "ingredients": "carrots, ginger, onion, coconut milk, vegetable broth, garlic, olive oil, salt, pepper",
+        "instructions": "Sauté onion and garlic in oil. Add carrots, ginger, and broth. Simmer until vegetables are tender. Blend until smooth. Stir in coconut milk and season with salt and pepper."
+      },
+      "labels": ["soup", "vegetarian", "comfort", "winter"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Extract the recipe from this page: https://example.com/recipes/chickpea-curry",
+      "url": "https://example.com/recipes/chickpea-curry"
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_url",
+      "url": "https://example.com/recipes/chickpea-curry",
+      "processed_recipe": {
+        "url": "https://example.com/recipes/chickpea-curry",
+        "title": "Chickpea Coconut Curry",
+        "ingredients": "chickpeas, coconut milk, onion, garlic, curry powder, spinach, tomato, salt, oil",
+        "instructions": "Cook onion and garlic in oil. Stir in curry powder and tomato. Add chickpeas and coconut milk. Simmer until thickened. Fold in spinach and serve with rice."
+      },
+      "labels": ["vegan", "curry", "easy", "protein"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Find a recipe for grilled salmon with asparagus.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "search_recipe_in_db",
+      "search_results": [
+        {"title": "Lemon Herb Salmon with Asparagus", "score": 0.92, "labels": ["salmon", "dinner", "healthy"]},
+        {"title": "Sheet Pan Salmon and Vegetables", "score": 0.88, "labels": ["salmon", "sheet-pan", "easy"]}
+      ],
+      "search_response": {
+        "message": "Top match found.",
+        "count": 2,
+        "top_match": "Lemon Herb Salmon with Asparagus"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Recommend a hearty vegetarian dinner with lentils.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "search_recipe_in_db",
+      "search_results": [
+        {"title": "Red Lentil Coconut Stew", "score": 0.9, "labels": ["vegetarian", "hearty", "stew"]},
+        {"title": "Lentil Shepherd's Pie", "score": 0.84, "labels": ["vegetarian", "comfort", "family"]}
+      ],
+      "search_response": {
+        "message": "Top match found.",
+        "count": 2,
+        "top_match": "Red Lentil Coconut Stew"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Plan a 3-day meal plan for a high-protein vegetarian diet.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "generate_meal_plan",
+      "search_results": [
+        {"title": "Greek Yogurt Chickpea Bowl", "score": 0.91, "labels": ["vegetarian", "protein", "meal-prep"]},
+        {"title": "Tofu Rice Stir-Fry", "score": 0.89, "labels": ["vegetarian", "protein", "quick"]},
+        {"title": "Lentil Quinoa Salad", "score": 0.87, "labels": ["vegetarian", "high-protein", "salad"]}
+      ],
+      "search_response": {
+        "message": "Meal plan candidates selected.",
+        "count": 3,
+        "top_match": "Greek Yogurt Chickpea Bowl"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Plan a family dinner for four using chicken and vegetables.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "generate_meal_plan",
+      "search_results": [
+        {"title": "Sheet Pan Chicken and Veggies", "score": 0.94, "labels": ["chicken", "dinner", "family"]},
+        {"title": "Chicken Fajita Bowls", "score": 0.9, "labels": ["chicken", "easy", "family"]}
+      ],
+      "search_response": {
+        "message": "Meal plan candidates selected.",
+        "count": 2,
+        "top_match": "Sheet Pan Chicken and Veggies"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "I need a dessert made from kale and bacon.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Kale Bacon Crisps",
+        "ingredients": "kale, bacon, olive oil, salt, pepper",
+        "instructions": "Bake kale and bacon until crisp. Toss with oil, salt, and pepper. Serve as a savory snack."
+      },
+      "labels": ["savory", "snack", "bacon"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Create a recipe for Thai basil chicken bowls.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Thai Basil Chicken Bowl",
+        "ingredients": "chicken breast, jasmine rice, basil, garlic, chili, soy sauce, lime, sesame oil",
+        "instructions": "Cook the rice. Sear the chicken with garlic and chili. Add soy sauce and basil. Finish with lime and sesame oil. Serve over rice."
+      },
+      "labels": ["thai", "dinner", "chicken", "easy"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "I need an easy breakfast recipe with eggs and potatoes.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "extract_recipe_from_text",
+      "processed_recipe": {
+        "url": "",
+        "title": "Potato Egg Skillet",
+        "ingredients": "potatoes, eggs, onion, olive oil, salt, pepper, cheddar",
+        "instructions": "Cook diced potatoes until crisp. Add onion and sauté. Crack in eggs and scramble gently. Top with cheddar and serve."
+      },
+      "labels": ["breakfast", "easy", "eggs", "comfort"]
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Show me a recipe for tomato basil soup.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "search_recipe_in_db",
+      "search_results": [
+        {"title": "Tomato Basil Soup", "score": 0.96, "labels": ["soup", "vegetarian", "comfort"]},
+        {"title": "Roasted Tomato Soup", "score": 0.9, "labels": ["vegetarian", "soups", "easy"]}
+      ],
+      "search_response": {
+        "message": "Top match found.",
+        "count": 2,
+        "top_match": "Tomato Basil Soup"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "Summarize the best chicken dinner recipe in the database.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "search_recipe_in_db",
+      "search_results": [
+        {"title": "Crispy Lemon Chicken Thighs", "score": 0.94, "labels": ["chicken", "dinner", "family"]},
+        {"title": "Garlic Herb Chicken Skillet", "score": 0.9, "labels": ["chicken", "quick", "comfort"]}
+      ],
+      "search_response": {
+        "message": "Top match found.",
+        "count": 2,
+        "top_match": "Crispy Lemon Chicken Thighs"
+      }
+    }
+  },
+  {
+    "inputs": {
+      "user_request": "I need a vegetarian meal plan for 2 people that includes chickpeas and quinoa.",
+      "url": ""
+    },
+    "outputs": {
+      "user_intent": "generate_meal_plan",
+      "search_results": [
+        {"title": "Chickpea Quinoa Bowl", "score": 0.93, "labels": ["vegetarian", "protein", "meal-prep"]},
+        {"title": "Quinoa Stuffed Peppers", "score": 0.88, "labels": ["vegetarian", "family", "grain"]}
+      ],
+      "search_response": {
+        "message": "Meal plan candidates selected.",
+        "count": 2,
+        "top_match": "Chickpea Quinoa Bowl"
+      }
+    }
+  }
+] 
